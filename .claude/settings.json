@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python setup_policies.py)",
+      "Bash(cmd /c \"cd /d \"\"c:\\\\Users\\\\胡嘉凡\\\\Desktop\\\\thoughtworks中国面试\"\" && python setup_policies.py && dir data\\\\policies\"\")"
+    ]
+  }
+}

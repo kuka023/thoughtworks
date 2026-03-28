@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
@@ -6,11 +7,25 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import json
+import shutil
+import base64
 from datetime import datetime
+from rag import rag
 
 load_dotenv()
 
-app = FastAPI()
+UPLOAD_DIR = "./data/uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs("./data/policies", exist_ok=True)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    rag.load()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 PRODUCT_TITLE = "AI 报销审核助手"
 PRODUCT_SUBTITLE = "员工提交 · 财务审核 · 管理洞察 一体化智能平台"
@@ -20,8 +35,9 @@ client = OpenAI(
     base_url="https://ark.volces.com/api/v3",
 )
 MODEL = os.getenv("ARK_MODEL", "doubao-pro-32k")
+VISION_MODEL = os.getenv("ARK_VISION_MODEL", "doubao-vision-pro-32k")
 
-# ── 内存数据库（演示用，预置真实感数据）──
+# ── 内存数据库 ──
 SUBMISSIONS = [
     {
         "id": "EXP-0315-001",
@@ -29,6 +45,7 @@ SUBMISSIONS = [
         "submit_time": "2024-03-15 09:23",
         "trip_start": "2024-03-10", "trip_end": "2024-03-14",
         "total_amount": 3280.0, "status": "待审核", "risk": "high",
+        "images": [],
         "items": [
             {"type": "交通费", "invoice_type": "增值税普通发票", "amount": 1200.0,
              "date": "2024-03-10", "vendor": "中国南方航空", "invoice_id": "044001800012",
@@ -48,6 +65,7 @@ SUBMISSIONS = [
         "submit_time": "2024-03-15 10:45",
         "trip_start": "2024-03-12", "trip_end": "2024-03-15",
         "total_amount": 2150.0, "status": "待审核", "risk": "low",
+        "images": [],
         "items": [
             {"type": "交通费", "invoice_type": "增值税普通发票", "amount": 850.0,
              "date": "2024-03-12", "vendor": "深圳北站", "invoice_id": "011002300078",
@@ -67,6 +85,7 @@ SUBMISSIONS = [
         "submit_time": "2024-03-15 14:22",
         "trip_start": "2024-03-08", "trip_end": "2024-03-12",
         "total_amount": 4890.0, "status": "待审核", "risk": "medium",
+        "images": [],
         "items": [
             {"type": "交通费", "invoice_type": "增值税普通发票", "amount": 1600.0,
              "date": "2024-03-08", "vendor": "中国国际航空", "invoice_id": "044001800099",
@@ -86,6 +105,7 @@ SUBMISSIONS = [
         "submit_time": "2024-03-14 16:08",
         "trip_start": "2024-03-11", "trip_end": "2024-03-14",
         "total_amount": 1890.0, "status": "已通过", "risk": "low",
+        "images": [],
         "items": [
             {"type": "交通费", "invoice_type": "增值税普通发票", "amount": 890.0,
              "date": "2024-03-11", "vendor": "上海虹桥站", "invoice_id": "011002300099",
@@ -105,6 +125,7 @@ SUBMISSIONS = [
         "submit_time": "2024-03-14 11:30",
         "trip_start": "2024-03-05", "trip_end": "2024-03-08",
         "total_amount": 5600.0, "status": "已退回", "risk": "high",
+        "images": [],
         "items": [
             {"type": "交通费", "invoice_type": "增值税普通发票", "amount": 2200.0,
              "date": "2024-03-05", "vendor": "中国东方航空", "invoice_id": "044001800111",
@@ -143,6 +164,7 @@ DASHBOARD = {
     "trend": {"last_month_count": 423, "this_month_count": 487, "growth_pct": 15.1},
 }
 
+
 # ── Pydantic 模型 ──
 class CheckRequest(BaseModel):
     employee: str
@@ -150,6 +172,7 @@ class CheckRequest(BaseModel):
     trip_end: str
     items: list
     total_amount: float
+
 
 class SubmitRequest(BaseModel):
     employee: str
@@ -159,14 +182,21 @@ class SubmitRequest(BaseModel):
     trip_end: str
     total_amount: float
     items: list
+    image_ids: list = []
+
 
 # ── 工具函数 ──
-def make_stream(system: str, user: str):
+def stream_llm(system: str, user: str, prefix_events: list = None):
+    """SSE 流：先发 prefix_events（如 citations），再流式输出 LLM"""
     def generate():
         try:
+            if prefix_events:
+                for ev in prefix_events:
+                    yield f"data: {json.dumps(ev)}\n\n"
             stream = client.chat.completions.create(
                 model=MODEL,
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                messages=[{"role": "system", "content": system},
+                          {"role": "user", "content": user}],
                 stream=True,
             )
             for chunk in stream:
@@ -178,18 +208,90 @@ def make_stream(system: str, user: str):
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
     return StreamingResponse(generate(), media_type="text/event-stream")
 
+
 # ── 路由 ──
 @app.get("/")
 def root():
     return FileResponse("static/index.html")
 
+
 @app.get("/config")
 def get_config():
     return {"product_title": PRODUCT_TITLE, "product_subtitle": PRODUCT_SUBTITLE}
 
+
+# ── 图片上传 & OCR ──
+@app.post("/upload/invoice")
+async def upload_invoice(file: UploadFile = File(...)):
+    """接收发票图片，调用视觉模型 OCR 识别，返回结构化字段"""
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".pdf", ".webp"}:
+        raise HTTPException(status_code=400, detail="仅支持 JPG/PNG/PDF/WEBP")
+
+    # 保存文件
+    file_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
+    save_path = os.path.join(UPLOAD_DIR, file_id)
+    with open(save_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    # 读取图片并 base64 编码
+    with open(save_path, "rb") as f:
+        img_b64 = base64.b64encode(f.read()).decode()
+
+    try:
+        resp = client.chat.completions.create(
+            model=VISION_MODEL,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+                    },
+                    {
+                        "type": "text",
+                        "text": """请识别这张发票图片，提取以下字段，以JSON格式返回（无法识别的字段留空字符串）：
+{
+  "invoice_type": "发票类型（增值税普通发票/增值税专用发票/定额发票/其他）",
+  "company_header": "发票抬头（购买方名称）",
+  "amount": 金额数字（仅数字，不含符号）,
+  "date": "开票日期（格式：YYYY-MM-DD）",
+  "vendor": "销售方名称",
+  "invoice_id": "发票号码",
+  "items_desc": "货物或服务描述（用于判断费用类型）"
+}
+只返回JSON，不要其他说明。"""
+                    }
+                ]
+            }],
+            max_tokens=500,
+        )
+        raw = resp.choices[0].message.content.strip()
+        # 提取 JSON
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        ocr_result = json.loads(raw[start:end]) if start >= 0 else {}
+    except Exception as e:
+        # 视觉模型不可用时返回 mock 数据（演示用）
+        ocr_result = {
+            "invoice_type": "增值税普通发票",
+            "company_header": "（OCR演示）某科技有限公司",
+            "amount": 680.0,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "vendor": "（OCR演示）某酒店",
+            "invoice_id": f"DEMO{datetime.now().strftime('%H%M%S')}",
+            "items_desc": "住宿服务",
+            "_note": f"视觉模型调用失败({e})，已返回演示数据"
+        }
+
+    return {"file_id": file_id, "filename": file.filename, "ocr": ocr_result}
+
+
+# ── 报销单 ──
 @app.get("/submissions")
 def get_submissions():
     return SUBMISSIONS
+
 
 @app.post("/submissions/submit")
 def submit_expense(req: SubmitRequest):
@@ -200,15 +302,17 @@ def submit_expense(req: SubmitRequest):
         "submit_time": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "trip_start": req.trip_start, "trip_end": req.trip_end,
         "total_amount": req.total_amount, "status": "待审核", "risk": "low",
+        "images": req.image_ids,
         "items": req.items, "issues": [],
     })
     return {"success": True, "id": new_id}
+
 
 @app.post("/submissions/check")
 def check_expense(req: CheckRequest):
     system = """你是企业报销合规预审AI，帮助员工在提交前发现问题。
 
-输出格式（使用Markdown）：
+输出格式（Markdown）：
 
 ## 预检结果
 
@@ -216,21 +320,21 @@ def check_expense(req: CheckRequest):
 
 **问题清单**
 
-（每个问题一行，格式：❌ 问题描述。如无问题：✅ 未发现合规问题）
+（每个问题一行：❌ 问题描述。无问题则：✅ 未发现合规问题）
 
 **修改建议**
 
-（针对每个问题的具体操作方法）
+（每个问题的具体操作方法）
 
 ---
-*以上为AI预检建议，不影响您的正式提交。*
+*以上为AI预检建议，不影响正式提交。*
 
-核查维度（逐一检查）：
-1. 发票抬头：必须包含公司名称，个人姓名=高风险
-2. 票据日期：必须在出差日期范围内，超出=中风险
-3. 费用类型匹配：餐饮费对应餐饮发票，不匹配=中风险
-4. 金额合理性：住宿超¥800/晚、餐饮超¥200/人次需提醒
-5. 发票类型：是否适合该费用类型"""
+核查维度：
+1. 发票抬头必须是公司名称，个人姓名=高风险
+2. 票据日期须在出差日期范围内，超出=中风险
+3. 费用类型与发票类型须匹配
+4. 住宿超¥800/晚、餐饮超¥200/人次需提醒
+5. 是否有重复发票号"""
 
     user = f"""员工：{req.employee}
 出差日期：{req.trip_start} 至 {req.trip_end}
@@ -239,7 +343,8 @@ def check_expense(req: CheckRequest):
 票据明细：
 {json.dumps(req.items, ensure_ascii=False, indent=2)}"""
 
-    return make_stream(system, user)
+    return stream_llm(system, user)
+
 
 @app.post("/submissions/{submission_id}/audit")
 def audit_submission(submission_id: str):
@@ -247,9 +352,19 @@ def audit_submission(submission_id: str):
     if not s:
         raise HTTPException(status_code=404, detail="报销单不存在")
 
-    system = """你是资深财务审核专家，为财务专员提供AI辅助审核意见。
+    # ── RAG：检索相关政策条款 ──
+    citations = rag.retrieve_for_submission(s)
 
-输出格式（使用Markdown）：
+    policy_ctx = ""
+    if citations:
+        policy_ctx = "\n\n## 检索到的相关政策条款（审核时请引用具体条款编号）\n"
+        for i, c in enumerate(citations, 1):
+            policy_ctx += f"[条款{i}]「{c['source']}」{c['rule']}\n"
+
+    system = f"""你是资深财务审核专家，为财务专员提供AI辅助审核意见。
+{"系统已从政策库中检索到相关条款，请在核查详情中明确引用对应条款编号（如[条款1]），增加审核的可追溯性。" if citations else ""}
+
+输出格式（Markdown）：
 
 ## 审核结论
 
@@ -259,7 +374,7 @@ def audit_submission(submission_id: str):
 
 ## 核查详情
 
-（每项格式：✅/⚠️/❌ **核查项**：说明）
+（每项：✅/⚠️/❌ **核查项**：说明，{"引用[条款X]" if citations else ""}）
 
 - 发票合规性
 - 日期匹配性
@@ -269,10 +384,10 @@ def audit_submission(submission_id: str):
 
 ## 退回意见
 
-（如建议退回，给出可直接发送给员工的标准化文字；如通过则写"无需退回"）
+（建议退回时给出标准化退回文字；通过则写"无需退回"）
 
 ---
-*本意见为AI辅助建议，最终审核决定权在财务专员。*"""
+*本意见为AI辅助建议，最终决定权在财务专员。*"""
 
     user = f"""报销单：{s['id']}
 员工：{s['employee']} | 部门：{s['department']} | 城市：{s['city']}
@@ -282,37 +397,62 @@ def audit_submission(submission_id: str):
 明细：
 {json.dumps(s['items'], ensure_ascii=False, indent=2)}
 
-系统预标记问题：{s['issues'] if s['issues'] else '无'}"""
+系统预标记问题：{s['issues'] if s['issues'] else '无'}
+{policy_ctx}"""
 
-    return make_stream(system, user)
+    # citations 作为第一个 SSE 事件发给前端展示
+    prefix = [{"citations": citations}] if citations else []
+    return stream_llm(system, user, prefix_events=prefix)
 
+
+# ── 政策管理 ──
+@app.get("/policies/status")
+def policy_status():
+    return rag.status()
+
+
+@app.post("/policies/reload")
+def reload_policies():
+    count = rag.load()
+    return {"success": True, "total_chunks": count, "files": rag.loaded_files}
+
+
+@app.post("/policies/upload")
+async def upload_policy(file: UploadFile = File(...)):
+    """上传新的政策 Excel 文件到策略库"""
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
+    save_path = os.path.join("./data/policies", file.filename)
+    with open(save_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    count = rag.load()
+    return {"success": True, "filename": file.filename, "total_chunks": count}
+
+
+# ── 仪表盘 ──
 @app.get("/dashboard")
 def get_dashboard():
     return DASHBOARD
 
+
 @app.post("/dashboard/analyze")
 def analyze_dashboard():
     d = DASHBOARD
-    system = """你是企业财务分析师，生成月度报销情况管理层摘要（使用Markdown，300字以内）。
+    system = """你是企业财务分析师，生成月度报销情况管理层摘要（Markdown，300字以内）。
 
 输出格式：
 
 ## 本月报销情况摘要
 
-**整体表现**
-
-（1-2句评价整体趋势和KPI达成）
+**整体表现**（1-2句，评价趋势和KPI）
 
 **风险预警**
-
 - 重点关注项1
 - 重点关注项2
 
-**下月预测与建议**
+**下月预测与建议**（预测+1-2条可操作建议）
 
-（基于趋势的预测 + 1-2条可操作建议）
-
-语言专业简洁，数字与提供数据严格一致。"""
+数字须与提供数据严格一致。"""
 
     user = f"""本月数据：
 - 总报销单数：{d['total_submissions']}份（上月{d['trend']['last_month_count']}份，增长{d['trend']['growth_pct']}%）
@@ -323,7 +463,7 @@ def analyze_dashboard():
 - 分公司异常率：北京{d['cities'][0]['anomaly_rate']}%，深圳{d['cities'][1]['anomaly_rate']}%，成都{d['cities'][2]['anomaly_rate']}%，上海{d['cities'][3]['anomaly_rate']}%
 - Top异常：{d['top_issues'][0]['type']}({d['top_issues'][0]['count']}例)、{d['top_issues'][1]['type']}({d['top_issues'][1]['count']}例)"""
 
-    return make_stream(system, user)
+    return stream_llm(system, user)
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
