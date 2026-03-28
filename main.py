@@ -6,26 +6,14 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import json
+from datetime import datetime
 
 load_dotenv()
 
 app = FastAPI()
 
-# ─────────────────────────────────────────────
-# ✏️  面试时只改这里
-SYSTEM_PROMPT = """你是一个专业的AI助手。
-请根据用户输入，提供结构化的分析和建议。
-输出格式：
-1. 核心问题
-2. 解决方案
-3. 执行步骤
-"""
-
-INPUT_PLACEHOLDER = "请输入内容..."
-OUTPUT_TITLE = "AI 分析结果"
-PRODUCT_TITLE = "AI 智能助手"
-PRODUCT_SUBTITLE = "由豆包大模型驱动"
-# ─────────────────────────────────────────────
+PRODUCT_TITLE = "AI 报销审核助手"
+PRODUCT_SUBTITLE = "员工提交 · 财务审核 · 管理洞察 一体化智能平台"
 
 client = OpenAI(
     api_key=os.getenv("ARK_API_KEY"),
@@ -33,39 +21,152 @@ client = OpenAI(
 )
 MODEL = os.getenv("ARK_MODEL", "doubao-pro-32k")
 
+# ── 内存数据库（演示用，预置真实感数据）──
+SUBMISSIONS = [
+    {
+        "id": "EXP-0315-001",
+        "employee": "张伟", "department": "销售部", "city": "北京",
+        "submit_time": "2024-03-15 09:23",
+        "trip_start": "2024-03-10", "trip_end": "2024-03-14",
+        "total_amount": 3280.0, "status": "待审核", "risk": "high",
+        "items": [
+            {"type": "交通费", "invoice_type": "增值税普通发票", "amount": 1200.0,
+             "date": "2024-03-10", "vendor": "中国南方航空", "invoice_id": "044001800012",
+             "company_header": "某科技有限公司"},
+            {"type": "住宿费", "invoice_type": "增值税普通发票", "amount": 1680.0,
+             "date": "2024-03-13", "vendor": "北京喜来登酒店", "invoice_id": "012003400089",
+             "company_header": "张伟"},
+            {"type": "餐饮费", "invoice_type": "增值税专用发票", "amount": 400.0,
+             "date": "2024-03-15", "vendor": "全聚德餐厅", "invoice_id": "033002100045",
+             "company_header": "某科技有限公司"},
+        ],
+        "issues": ["住宿费发票抬头为个人姓名「张伟」，非公司名称", "餐饮费票据日期(3月15日)超出出差范围(3月10-14日)"],
+    },
+    {
+        "id": "EXP-0315-002",
+        "employee": "李娜", "department": "产品部", "city": "深圳",
+        "submit_time": "2024-03-15 10:45",
+        "trip_start": "2024-03-12", "trip_end": "2024-03-15",
+        "total_amount": 2150.0, "status": "待审核", "risk": "low",
+        "items": [
+            {"type": "交通费", "invoice_type": "增值税普通发票", "amount": 850.0,
+             "date": "2024-03-12", "vendor": "深圳北站", "invoice_id": "011002300078",
+             "company_header": "某科技有限公司"},
+            {"type": "住宿费", "invoice_type": "增值税普通发票", "amount": 980.0,
+             "date": "2024-03-13", "vendor": "深圳万豪酒店", "invoice_id": "021004500023",
+             "company_header": "某科技有限公司"},
+            {"type": "餐饮费", "invoice_type": "增值税普通发票", "amount": 320.0,
+             "date": "2024-03-14", "vendor": "海底捞餐厅", "invoice_id": "031001200067",
+             "company_header": "某科技有限公司"},
+        ],
+        "issues": [],
+    },
+    {
+        "id": "EXP-0315-003",
+        "employee": "王强", "department": "技术部", "city": "成都",
+        "submit_time": "2024-03-15 14:22",
+        "trip_start": "2024-03-08", "trip_end": "2024-03-12",
+        "total_amount": 4890.0, "status": "待审核", "risk": "medium",
+        "items": [
+            {"type": "交通费", "invoice_type": "增值税普通发票", "amount": 1600.0,
+             "date": "2024-03-08", "vendor": "中国国际航空", "invoice_id": "044001800099",
+             "company_header": "某科技有限公司"},
+            {"type": "住宿费", "invoice_type": "增值税普通发票", "amount": 2400.0,
+             "date": "2024-03-09", "vendor": "成都锦江宾馆", "invoice_id": "021004500089",
+             "company_header": "某科技有限公司"},
+            {"type": "办公用品", "invoice_type": "增值税专用发票", "amount": 890.0,
+             "date": "2024-03-11", "vendor": "成都办公超市", "invoice_id": "031001200099",
+             "company_header": "某科技有限公司"},
+        ],
+        "issues": ["办公用品单笔金额(¥890)超过政策上限(¥800)"],
+    },
+    {
+        "id": "EXP-0314-004",
+        "employee": "赵敏", "department": "交付部", "city": "上海",
+        "submit_time": "2024-03-14 16:08",
+        "trip_start": "2024-03-11", "trip_end": "2024-03-14",
+        "total_amount": 1890.0, "status": "已通过", "risk": "low",
+        "items": [
+            {"type": "交通费", "invoice_type": "增值税普通发票", "amount": 890.0,
+             "date": "2024-03-11", "vendor": "上海虹桥站", "invoice_id": "011002300099",
+             "company_header": "某科技有限公司"},
+            {"type": "住宿费", "invoice_type": "增值税普通发票", "amount": 780.0,
+             "date": "2024-03-12", "vendor": "上海如家酒店", "invoice_id": "021004500099",
+             "company_header": "某科技有限公司"},
+            {"type": "餐饮费", "invoice_type": "增值税普通发票", "amount": 220.0,
+             "date": "2024-03-13", "vendor": "南京路餐厅", "invoice_id": "031001200111",
+             "company_header": "某科技有限公司"},
+        ],
+        "issues": [],
+    },
+    {
+        "id": "EXP-0314-005",
+        "employee": "陈磊", "department": "销售部", "city": "北京",
+        "submit_time": "2024-03-14 11:30",
+        "trip_start": "2024-03-05", "trip_end": "2024-03-08",
+        "total_amount": 5600.0, "status": "已退回", "risk": "high",
+        "items": [
+            {"type": "交通费", "invoice_type": "增值税普通发票", "amount": 2200.0,
+             "date": "2024-03-05", "vendor": "中国东方航空", "invoice_id": "044001800111",
+             "company_header": "某科技有限公司"},
+            {"type": "住宿费", "invoice_type": "增值税普通发票", "amount": 2800.0,
+             "date": "2024-03-06", "vendor": "北京华尔道夫酒店", "invoice_id": "012003400111",
+             "company_header": "某科技有限公司"},
+            {"type": "餐饮费", "invoice_type": "增值税普通发票", "amount": 600.0,
+             "date": "2024-03-07", "vendor": "俏江南餐厅", "invoice_id": "031001200222",
+             "company_header": "某科技有限公司"},
+        ],
+        "issues": ["住宿费单晚¥2800超出差标准上限(¥800/晚)", "华尔道夫五星级酒店超差标，需总监审批"],
+    },
+]
 
-class ChatRequest(BaseModel):
-    user_input: str
+DASHBOARD = {
+    "total_submissions": 487,
+    "total_amount": 1285400,
+    "avg_audit_minutes": 4.2,
+    "anomaly_rate": 8.3,
+    "target_anomaly_rate": 10.0,
+    "passed": 401,
+    "rejected": 46,
+    "pending": 40,
+    "cities": [
+        {"name": "北京", "count": 156, "amount": 412000, "anomaly_rate": 9.2},
+        {"name": "深圳", "count": 143, "amount": 389000, "anomaly_rate": 7.1},
+        {"name": "成都", "count": 98, "amount": 267000, "anomaly_rate": 8.8},
+        {"name": "上海", "count": 90, "amount": 217400, "anomaly_rate": 7.9},
+    ],
+    "top_issues": [
+        {"type": "发票抬头错误", "count": 89, "pct": 18.3},
+        {"type": "日期范围超出", "count": 67, "pct": 13.8},
+        {"type": "金额超限", "count": 52, "pct": 10.7},
+    ],
+    "trend": {"last_month_count": 423, "this_month_count": 487, "growth_pct": 15.1},
+}
 
+# ── Pydantic 模型 ──
+class CheckRequest(BaseModel):
+    employee: str
+    trip_start: str
+    trip_end: str
+    items: list
+    total_amount: float
 
-@app.get("/")
-def root():
-    return FileResponse("static/index.html")
+class SubmitRequest(BaseModel):
+    employee: str
+    department: str
+    city: str
+    trip_start: str
+    trip_end: str
+    total_amount: float
+    items: list
 
-
-@app.get("/config")
-def get_config():
-    return {
-        "product_title": PRODUCT_TITLE,
-        "product_subtitle": PRODUCT_SUBTITLE,
-        "input_placeholder": INPUT_PLACEHOLDER,
-        "output_title": OUTPUT_TITLE,
-    }
-
-
-@app.post("/chat/stream")
-async def chat_stream(req: ChatRequest):
-    if not req.user_input.strip():
-        raise HTTPException(status_code=400, detail="输入不能为空")
-
+# ── 工具函数 ──
+def make_stream(system: str, user: str):
     def generate():
         try:
             stream = client.chat.completions.create(
                 model=MODEL,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": req.user_input},
-                ],
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                 stream=True,
             )
             for chunk in stream:
@@ -75,8 +176,154 @@ async def chat_stream(req: ChatRequest):
             yield "data: [DONE]\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
-
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+# ── 路由 ──
+@app.get("/")
+def root():
+    return FileResponse("static/index.html")
+
+@app.get("/config")
+def get_config():
+    return {"product_title": PRODUCT_TITLE, "product_subtitle": PRODUCT_SUBTITLE}
+
+@app.get("/submissions")
+def get_submissions():
+    return SUBMISSIONS
+
+@app.post("/submissions/submit")
+def submit_expense(req: SubmitRequest):
+    new_id = f"EXP-NEW-{len(SUBMISSIONS)+1:03d}"
+    SUBMISSIONS.insert(0, {
+        "id": new_id,
+        "employee": req.employee, "department": req.department, "city": req.city,
+        "submit_time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "trip_start": req.trip_start, "trip_end": req.trip_end,
+        "total_amount": req.total_amount, "status": "待审核", "risk": "low",
+        "items": req.items, "issues": [],
+    })
+    return {"success": True, "id": new_id}
+
+@app.post("/submissions/check")
+def check_expense(req: CheckRequest):
+    system = """你是企业报销合规预审AI，帮助员工在提交前发现问题。
+
+输出格式（使用Markdown）：
+
+## 预检结果
+
+**风险等级**：🟢 低风险 / 🟡 中风险 / 🔴 高风险（三选一）
+
+**问题清单**
+
+（每个问题一行，格式：❌ 问题描述。如无问题：✅ 未发现合规问题）
+
+**修改建议**
+
+（针对每个问题的具体操作方法）
+
+---
+*以上为AI预检建议，不影响您的正式提交。*
+
+核查维度（逐一检查）：
+1. 发票抬头：必须包含公司名称，个人姓名=高风险
+2. 票据日期：必须在出差日期范围内，超出=中风险
+3. 费用类型匹配：餐饮费对应餐饮发票，不匹配=中风险
+4. 金额合理性：住宿超¥800/晚、餐饮超¥200/人次需提醒
+5. 发票类型：是否适合该费用类型"""
+
+    user = f"""员工：{req.employee}
+出差日期：{req.trip_start} 至 {req.trip_end}
+报销总额：¥{req.total_amount}
+
+票据明细：
+{json.dumps(req.items, ensure_ascii=False, indent=2)}"""
+
+    return make_stream(system, user)
+
+@app.post("/submissions/{submission_id}/audit")
+def audit_submission(submission_id: str):
+    s = next((x for x in SUBMISSIONS if x["id"] == submission_id), None)
+    if not s:
+        raise HTTPException(status_code=404, detail="报销单不存在")
+
+    system = """你是资深财务审核专家，为财务专员提供AI辅助审核意见。
+
+输出格式（使用Markdown）：
+
+## 审核结论
+
+**建议操作**：✅ 通过 / ⚠️ 人工复核 / ❌ 建议退回（三选一）
+
+**风险等级**：🟢 低风险 / 🟡 中风险 / 🔴 高风险
+
+## 核查详情
+
+（每项格式：✅/⚠️/❌ **核查项**：说明）
+
+- 发票合规性
+- 日期匹配性
+- 金额准确性
+- 费用类型合理性
+- 政策符合性
+
+## 退回意见
+
+（如建议退回，给出可直接发送给员工的标准化文字；如通过则写"无需退回"）
+
+---
+*本意见为AI辅助建议，最终审核决定权在财务专员。*"""
+
+    user = f"""报销单：{s['id']}
+员工：{s['employee']} | 部门：{s['department']} | 城市：{s['city']}
+出差日期：{s['trip_start']} 至 {s['trip_end']}
+申报总额：¥{s['total_amount']}
+
+明细：
+{json.dumps(s['items'], ensure_ascii=False, indent=2)}
+
+系统预标记问题：{s['issues'] if s['issues'] else '无'}"""
+
+    return make_stream(system, user)
+
+@app.get("/dashboard")
+def get_dashboard():
+    return DASHBOARD
+
+@app.post("/dashboard/analyze")
+def analyze_dashboard():
+    d = DASHBOARD
+    system = """你是企业财务分析师，生成月度报销情况管理层摘要（使用Markdown，300字以内）。
+
+输出格式：
+
+## 本月报销情况摘要
+
+**整体表现**
+
+（1-2句评价整体趋势和KPI达成）
+
+**风险预警**
+
+- 重点关注项1
+- 重点关注项2
+
+**下月预测与建议**
+
+（基于趋势的预测 + 1-2条可操作建议）
+
+语言专业简洁，数字与提供数据严格一致。"""
+
+    user = f"""本月数据：
+- 总报销单数：{d['total_submissions']}份（上月{d['trend']['last_month_count']}份，增长{d['trend']['growth_pct']}%）
+- 总报销金额：¥{d['total_amount']:,}
+- 平均审核时长：{d['avg_audit_minutes']}分钟/单（AI介入前约12分钟）
+- 异常率：{d['anomaly_rate']}%（目标<{d['target_anomaly_rate']}%）
+- 审核结果：通过{d['passed']}单，退回{d['rejected']}单，待审{d['pending']}单
+- 分公司异常率：北京{d['cities'][0]['anomaly_rate']}%，深圳{d['cities'][1]['anomaly_rate']}%，成都{d['cities'][2]['anomaly_rate']}%，上海{d['cities'][3]['anomaly_rate']}%
+- Top异常：{d['top_issues'][0]['type']}({d['top_issues'][0]['count']}例)、{d['top_issues'][1]['type']}({d['top_issues'][1]['count']}例)"""
+
+    return make_stream(system, user)
 
 
 app.mount("/static", StaticFiles(directory="static"), name="static")

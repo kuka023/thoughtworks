@@ -3,235 +3,579 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI 智能助手</title>
+  <title>AI 报销审核助手</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <style>
     body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; }
     .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-    .card { backdrop-filter: blur(10px); }
-    #output-content { white-space: pre-wrap; line-height: 1.8; }
-    .cursor-blink::after {
-      content: '▋';
-      animation: blink 1s infinite;
-      color: #764ba2;
-    }
+    .tab-active { border-bottom: 3px solid #764ba2; color: #764ba2; font-weight: 600; }
+    .risk-high  { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
+    .risk-medium{ background: #fef9c3; color: #ca8a04; border: 1px solid #fde68a; }
+    .risk-low   { background: #dcfce7; color: #16a34a; border: 1px solid #bbf7d0; }
+    .md h2  { font-size:.9rem; font-weight:700; margin:.8rem 0 .3rem; color:#374151; border-bottom:1px solid #e5e7eb; padding-bottom:.25rem; }
+    .md h3  { font-size:.85rem; font-weight:600; margin:.6rem 0 .2rem; color:#4b5563; }
+    .md strong { font-weight:600; color:#374151; }
+    .md ul  { list-style:disc; padding-left:1.2rem; margin:.3rem 0; }
+    .md li  { margin:.15rem 0; }
+    .md p   { margin:.3rem 0; }
+    .md hr  { border:none; border-top:1px solid #e5e7eb; margin:.8rem 0; }
+    .cursor-blink::after { content:'▋'; animation:blink 1s infinite; color:#764ba2; }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-    .loading-dots span {
-      animation: dots 1.2s infinite;
-      display: inline-block;
-    }
-    .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
-    .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes dots { 0%,80%,100%{opacity:0} 40%{opacity:1} }
+    .loading-dots span { animation:dots 1.2s infinite; display:inline-block; }
+    .loading-dots span:nth-child(2){animation-delay:.2s}
+    .loading-dots span:nth-child(3){animation-delay:.4s}
+    @keyframes dots {0%,80%,100%{opacity:0}40%{opacity:1}}
+    .sub-row:hover { background:#f5f3ff; cursor:pointer; }
   </style>
 </head>
 <body class="min-h-screen bg-gray-50">
 
-  <!-- Header -->
-  <div class="gradient-bg text-white py-8 px-6 shadow-lg">
-    <div class="max-w-4xl mx-auto">
-      <h1 id="product-title" class="text-3xl font-bold mb-1">AI 智能助手</h1>
-      <p id="product-subtitle" class="text-purple-200 text-sm">由豆包大模型驱动</p>
-    </div>
+<!-- Header -->
+<div class="gradient-bg text-white py-5 px-6 shadow-lg">
+  <div class="max-w-6xl mx-auto">
+    <h1 class="text-2xl font-bold mb-0.5">AI 报销审核助手</h1>
+    <p class="text-purple-200 text-xs">员工提交 · 财务审核 · 管理洞察 一体化智能平台 | 由豆包大模型驱动</p>
   </div>
+</div>
 
-  <div class="max-w-4xl mx-auto px-6 py-8 space-y-6">
+<!-- Tabs -->
+<div class="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+  <div class="max-w-6xl mx-auto px-6 flex gap-8">
+    <button onclick="showTab('employee')" id="tab-employee"
+      class="tab-btn py-4 text-sm text-gray-500 transition tab-active">👤 员工报销提交</button>
+    <button onclick="showTab('finance')" id="tab-finance"
+      class="tab-btn py-4 text-sm text-gray-500 transition">🏦 财务审核台</button>
+    <button onclick="showTab('dashboard')" id="tab-dashboard"
+      class="tab-btn py-4 text-sm text-gray-500 transition">📊 管理仪表盘</button>
+  </div>
+</div>
 
-    <!-- Input Card -->
-    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-      <label class="block text-sm font-semibold text-gray-600 mb-3">输入</label>
-      <textarea
-        id="user-input"
-        rows="6"
-        placeholder="请输入内容..."
-        class="w-full border border-gray-200 rounded-xl p-4 text-gray-800 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition"
-      ></textarea>
+<div class="max-w-6xl mx-auto px-6 py-6">
 
-      <div class="flex items-center justify-between mt-4">
-        <span id="char-count" class="text-xs text-gray-400">0 字</span>
-        <div class="flex gap-3">
-          <button
-            id="clear-btn"
-            onclick="clearAll()"
-            class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:border-gray-300 transition"
-          >
-            清空
-          </button>
-          <button
-            id="submit-btn"
-            onclick="submitChat()"
-            class="px-6 py-2 text-sm text-white gradient-bg rounded-lg hover:opacity-90 transition font-medium shadow-sm"
-          >
-            分析
-          </button>
+<!-- ═══════ TAB 1: 员工提交 ═══════ -->
+<div id="panel-employee" class="tab-panel space-y-4">
+
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+    <h2 class="text-sm font-semibold text-gray-700 mb-4">📋 报销基本信息</h2>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">员工姓名</label>
+        <input id="emp-name" type="text" placeholder="请输入姓名"
+          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">所在分公司</label>
+        <select id="emp-city"
+          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
+          <option>上海</option><option>北京</option><option>深圳</option><option>成都</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">部门</label>
+        <select id="emp-dept"
+          class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
+          <option>销售部</option><option>产品部</option><option>技术部</option><option>交付部</option><option>运营部</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">出差日期</label>
+        <div class="flex gap-2 items-center">
+          <input id="trip-start" type="date"
+            class="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+          <span class="text-gray-300 text-sm">→</span>
+          <input id="trip-end" type="date"
+            class="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- Output Card -->
-    <div id="output-card" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hidden">
-      <div class="flex items-center justify-between mb-4">
-        <label id="output-title" class="block text-sm font-semibold text-gray-600">AI 分析结果</label>
-        <button
-          onclick="copyResult()"
-          class="text-xs text-purple-500 hover:text-purple-700 flex items-center gap-1 transition"
-        >
-          复制结果
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold text-gray-700">🧾 票据明细</h2>
+      <div class="flex gap-2">
+        <button onclick="simulateOCR()"
+          class="px-3 py-1.5 text-xs bg-purple-50 text-purple-600 border border-purple-200 rounded-lg hover:bg-purple-100 transition">
+          📷 模拟OCR识别
+        </button>
+        <button onclick="addItem()"
+          class="px-3 py-1.5 text-xs bg-gray-50 text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-100 transition">
+          + 添加票据
         </button>
       </div>
-
-      <!-- Loading state -->
-      <div id="loading-state" class="hidden text-center py-8">
-        <div class="loading-dots text-2xl text-purple-400">
-          <span>·</span><span>·</span><span>·</span>
-        </div>
-        <p class="text-gray-400 text-sm mt-2">正在分析中...</p>
-      </div>
-
-      <!-- Output content -->
-      <div
-        id="output-content"
-        class="text-gray-700 text-sm leading-relaxed min-h-[100px]"
-      ></div>
     </div>
 
-    <!-- Error Card -->
-    <div id="error-card" class="hidden bg-red-50 border border-red-200 rounded-2xl p-4">
-      <p id="error-msg" class="text-red-600 text-sm"></p>
+    <div class="grid grid-cols-6 gap-2 text-xs text-gray-400 mb-2 px-1">
+      <span>费用类型</span><span>发票类型</span><span>发票抬头</span><span>票据日期</span><span>金额(¥)</span><span></span>
     </div>
+    <div id="items-container" class="space-y-2"></div>
 
+    <div class="mt-4 pt-4 border-t border-gray-100 flex justify-between items-center">
+      <span class="text-xs text-gray-400">合计金额</span>
+      <span id="total-amount" class="text-xl font-bold text-purple-700">¥0.00</span>
+    </div>
   </div>
 
-  <script>
-    let isStreaming = false;
+  <div class="flex gap-3 justify-end">
+    <button onclick="preCheck()"
+      class="px-5 py-2.5 text-sm bg-amber-50 text-amber-700 border border-amber-200 rounded-xl hover:bg-amber-100 transition font-medium">
+      🔍 AI预检（提交前）
+    </button>
+    <button onclick="submitExpense()"
+      class="px-6 py-2.5 text-sm text-white gradient-bg rounded-xl hover:opacity-90 transition font-medium shadow-sm">
+      提交报销单 →
+    </button>
+  </div>
 
-    // Load config from backend
-    fetch('/config')
-      .then(r => r.json())
-      .then(cfg => {
-        document.getElementById('product-title').textContent = cfg.product_title;
-        document.getElementById('product-subtitle').textContent = cfg.product_subtitle;
-        document.getElementById('user-input').placeholder = cfg.input_placeholder;
-        document.getElementById('output-title').textContent = cfg.output_title;
-        document.title = cfg.product_title;
-        document.getElementById('submit-btn').textContent = '分析';
-      });
+  <div id="check-card" class="hidden bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold text-gray-600">🔍 AI 预检结果</h3>
+      <span class="text-xs text-gray-300">仅供参考，不影响提交</span>
+    </div>
+    <div id="check-loading" class="hidden text-center py-4">
+      <div class="loading-dots text-xl text-purple-400"><span>·</span><span>·</span><span>·</span></div>
+      <p class="text-gray-400 text-xs mt-1">正在合规检查...</p>
+    </div>
+    <div id="check-output" class="md text-sm text-gray-700 min-h-[60px]"></div>
+  </div>
 
-    // Char count
-    document.getElementById('user-input').addEventListener('input', function() {
-      document.getElementById('char-count').textContent = this.value.length + ' 字';
-    });
+  <div id="submit-success" class="hidden bg-green-50 border border-green-200 rounded-2xl p-4">
+    <p class="text-green-700 text-sm">✅ 报销单已提交成功！财务将在3个工作日内完成审核，可在「财务审核台」查看进度。</p>
+  </div>
+</div>
 
-    // Ctrl+Enter to submit
-    document.getElementById('user-input').addEventListener('keydown', function(e) {
-      if (e.ctrlKey && e.key === 'Enter') submitChat();
-    });
+<!-- ═══════ TAB 2: 财务审核台 ═══════ -->
+<div id="panel-finance" class="tab-panel hidden space-y-4">
 
-    async function submitChat() {
-      if (isStreaming) return;
-      const input = document.getElementById('user-input').value.trim();
-      if (!input) {
-        showError('请输入内容后再提交');
-        return;
-      }
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-gray-700">报销单队列</h2>
+      <div class="flex gap-2 text-xs">
+        <span class="px-2 py-1 bg-red-50 text-red-500 rounded-lg">🔴 高风险优先显示</span>
+        <span id="pending-count" class="px-2 py-1 bg-gray-50 text-gray-400 rounded-lg">待审核: --</span>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-xs text-gray-400">
+          <tr>
+            <th class="px-4 py-3 text-left">风险</th>
+            <th class="px-4 py-3 text-left">单号</th>
+            <th class="px-4 py-3 text-left">员工 / 部门</th>
+            <th class="px-4 py-3 text-left">城市</th>
+            <th class="px-4 py-3 text-left">提交时间</th>
+            <th class="px-4 py-3 text-right">金额</th>
+            <th class="px-4 py-3 text-center">状态</th>
+            <th class="px-4 py-3 text-center">操作</th>
+          </tr>
+        </thead>
+        <tbody id="submissions-table">
+          <tr><td colspan="8" class="text-center py-8 text-gray-300">加载中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 
-      isStreaming = true;
-      hideError();
-      showOutput();
-      setLoading(true);
+  <div id="audit-panel" class="hidden bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 id="audit-title" class="text-sm font-semibold text-gray-700">AI 审核报告</h3>
+      <div class="flex gap-2">
+        <button onclick="approveSubmission()"
+          class="px-4 py-1.5 text-xs text-white bg-green-500 rounded-lg hover:bg-green-600 transition">
+          ✅ 通过
+        </button>
+        <button onclick="rejectSubmission()"
+          class="px-4 py-1.5 text-xs text-white bg-red-500 rounded-lg hover:bg-red-600 transition">
+          ❌ 退回
+        </button>
+      </div>
+    </div>
 
-      const outputEl = document.getElementById('output-content');
-      outputEl.textContent = '';
-      outputEl.classList.remove('cursor-blink');
+    <div id="issues-section" class="hidden mb-4 p-3 bg-red-50 rounded-xl border border-red-100">
+      <p class="text-xs font-semibold text-red-500 mb-2">⚠️ 系统预标记问题</p>
+      <div id="issues-list" class="space-y-1"></div>
+    </div>
 
+    <div id="audit-loading" class="hidden text-center py-6">
+      <div class="loading-dots text-xl text-purple-400"><span>·</span><span>·</span><span>·</span></div>
+      <p class="text-gray-400 text-xs mt-1">AI 正在审核中...</p>
+    </div>
+    <div id="audit-output" class="md text-sm text-gray-700 min-h-[80px]"></div>
+  </div>
+</div>
+
+<!-- ═══════ TAB 3: 管理仪表盘 ═══════ -->
+<div id="panel-dashboard" class="tab-panel hidden space-y-4">
+
+  <div class="grid grid-cols-4 gap-4">
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <p class="text-xs text-gray-400 mb-1">本月报销总单数</p>
+      <p id="d-total" class="text-2xl font-bold text-gray-800">--</p>
+      <p id="d-trend" class="text-xs text-emerald-500 mt-1">--</p>
+    </div>
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <p class="text-xs text-gray-400 mb-1">本月报销总额</p>
+      <p id="d-amount" class="text-2xl font-bold text-gray-800">--</p>
+      <p class="text-xs text-gray-300 mt-1">元</p>
+    </div>
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <p class="text-xs text-gray-400 mb-1">平均审核时长</p>
+      <p id="d-avg" class="text-2xl font-bold text-purple-600">--</p>
+      <p class="text-xs text-gray-300 mt-1">分钟/单（AI介入前约12分钟）</p>
+    </div>
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <p class="text-xs text-gray-400 mb-1">异常率</p>
+      <p id="d-anomaly" class="text-2xl font-bold text-green-600">--</p>
+      <p class="text-xs text-gray-300 mt-1">目标 &lt;10%，本月达标</p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-2 gap-4">
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <h3 class="text-sm font-semibold text-gray-700 mb-3">分公司对比</h3>
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="text-gray-400">
+            <th class="pb-2 text-left font-normal">城市</th>
+            <th class="pb-2 text-right font-normal">单数</th>
+            <th class="pb-2 text-right font-normal">金额</th>
+            <th class="pb-2 text-right font-normal">异常率</th>
+          </tr>
+        </thead>
+        <tbody id="city-table" class="divide-y divide-gray-50">
+          <tr><td colspan="4" class="py-4 text-center text-gray-300">加载中...</td></tr>
+        </tbody>
+      </table>
+
+      <h3 class="text-sm font-semibold text-gray-700 mt-5 mb-3">审核结果分布</h3>
+      <div class="flex gap-2 text-xs">
+        <div class="flex-1 bg-green-50 rounded-xl p-3 text-center">
+          <p id="d-passed" class="text-xl font-bold text-green-600">--</p>
+          <p class="text-gray-400 mt-1">已通过</p>
+        </div>
+        <div class="flex-1 bg-red-50 rounded-xl p-3 text-center">
+          <p id="d-rejected" class="text-xl font-bold text-red-500">--</p>
+          <p class="text-gray-400 mt-1">已退回</p>
+        </div>
+        <div class="flex-1 bg-amber-50 rounded-xl p-3 text-center">
+          <p id="d-pending" class="text-xl font-bold text-amber-600">--</p>
+          <p class="text-gray-400 mt-1">待审核</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <h3 class="text-sm font-semibold text-gray-700 mb-3">Top 异常类型</h3>
+      <div id="issues-chart" class="space-y-3">
+        <p class="text-gray-300 text-xs">加载中...</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-semibold text-gray-700">🤖 AI 管理层月度摘要</h3>
+      <button onclick="analyzeDashboard()"
+        class="px-4 py-1.5 text-xs text-white gradient-bg rounded-lg hover:opacity-90 transition">
+        生成分析报告
+      </button>
+    </div>
+    <div id="analyze-loading" class="hidden text-center py-4">
+      <div class="loading-dots text-xl text-purple-400"><span>·</span><span>·</span><span>·</span></div>
+      <p class="text-gray-400 text-xs mt-1">AI 正在生成报告...</p>
+    </div>
+    <div id="analyze-output" class="md text-sm text-gray-600 min-h-[60px]">
+      <p class="text-gray-300 text-xs">点击「生成分析报告」获取 AI 管理层月度摘要</p>
+    </div>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<script>
+let currentSubmissionId = null;
+let submissions = [];
+let itemCount = 0;
+
+// ── Tab ──
+function showTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
+  document.getElementById('panel-' + name).classList.remove('hidden');
+  document.getElementById('tab-' + name).classList.add('tab-active');
+  if (name === 'finance') loadSubmissions();
+  if (name === 'dashboard') loadDashboard();
+}
+
+// ── Tab 1: 员工侧 ──
+function addItem(data = {}) {
+  itemCount++;
+  const id = 'item-' + itemCount;
+  const div = document.createElement('div');
+  div.id = id;
+  div.className = 'grid grid-cols-6 gap-2 items-center p-3 bg-gray-50 rounded-xl';
+  div.innerHTML = `
+    <select data-field="type" onchange="calcTotal()"
+      class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-purple-400">
+      <option>交通费</option><option>住宿费</option><option>餐饮费</option><option>办公用品</option><option>其他</option>
+    </select>
+    <select data-field="invoice_type"
+      class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-purple-400">
+      <option>增值税普通发票</option><option>增值税专用发票</option><option>定额发票</option>
+    </select>
+    <input type="text" placeholder="发票抬头" data-field="company_header"
+      class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-400" />
+    <input type="date" data-field="date"
+      class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-400" />
+    <input type="number" placeholder="0.00" data-field="amount" oninput="calcTotal()"
+      class="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-400" />
+    <button onclick="document.getElementById('${id}').remove();calcTotal();"
+      class="text-gray-300 hover:text-red-400 text-base transition text-center">✕</button>
+  `;
+  if (data.type) div.querySelector('[data-field="type"]').value = data.type;
+  if (data.invoice_type) div.querySelector('[data-field="invoice_type"]').value = data.invoice_type;
+  if (data.company_header) div.querySelector('[data-field="company_header"]').value = data.company_header;
+  if (data.date) div.querySelector('[data-field="date"]').value = data.date;
+  if (data.amount) div.querySelector('[data-field="amount"]').value = data.amount;
+  document.getElementById('items-container').appendChild(div);
+  calcTotal();
+}
+
+function calcTotal() {
+  let t = 0;
+  document.querySelectorAll('[data-field="amount"]').forEach(e => { t += parseFloat(e.value) || 0; });
+  document.getElementById('total-amount').textContent = '¥' + t.toFixed(2);
+}
+
+function getItems() {
+  return Array.from(document.getElementById('items-container').children).map(row => ({
+    type: row.querySelector('[data-field="type"]').value,
+    invoice_type: row.querySelector('[data-field="invoice_type"]').value,
+    company_header: row.querySelector('[data-field="company_header"]').value,
+    date: row.querySelector('[data-field="date"]').value,
+    amount: parseFloat(row.querySelector('[data-field="amount"]').value) || 0,
+  }));
+}
+
+function simulateOCR() {
+  // 模拟OCR识别结果：预置含问题的示例数据
+  document.getElementById('emp-name').value = '演示用户';
+  document.getElementById('trip-start').value = '2024-03-10';
+  document.getElementById('trip-end').value = '2024-03-13';
+  document.getElementById('items-container').innerHTML = '';
+  itemCount = 0;
+  addItem({ type:'交通费', invoice_type:'增值税普通发票', company_header:'某科技有限公司', date:'2024-03-10', amount:1200 });
+  addItem({ type:'住宿费', invoice_type:'增值税普通发票', company_header:'演示用户', date:'2024-03-11', amount:680 }); // 抬头问题
+  addItem({ type:'餐饮费', invoice_type:'增值税普通发票', company_header:'某科技有限公司', date:'2024-03-15', amount:280 }); // 日期超出
+  calcTotal();
+  showToast('✨ OCR识别完成：3张票据，点击「AI预检」检查合规性');
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 bg-purple-600 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 transition';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+async function preCheck() {
+  const name = document.getElementById('emp-name').value.trim();
+  const tripStart = document.getElementById('trip-start').value;
+  const tripEnd = document.getElementById('trip-end').value;
+  const items = getItems();
+  if (!name || !tripStart || items.length === 0) { showToast('请先填写基本信息和至少一条票据'); return; }
+  const total = items.reduce((s, i) => s + i.amount, 0);
+
+  document.getElementById('check-card').classList.remove('hidden');
+  document.getElementById('check-loading').classList.remove('hidden');
+  document.getElementById('check-output').innerHTML = '';
+
+  const resp = await fetch('/submissions/check', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ employee: name, trip_start: tripStart, trip_end: tripEnd, items, total_amount: total }),
+  });
+  document.getElementById('check-loading').classList.add('hidden');
+  await streamToHtml(resp, 'check-output');
+}
+
+async function submitExpense() {
+  const name = document.getElementById('emp-name').value.trim();
+  if (!name) { showToast('请先填写姓名'); return; }
+  const items = getItems();
+  if (items.length === 0) { showToast('请至少添加一条票据'); return; }
+  const total = items.reduce((s, i) => s + i.amount, 0);
+  await fetch('/submissions/submit', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      employee: name,
+      department: document.getElementById('emp-dept').value,
+      city: document.getElementById('emp-city').value,
+      trip_start: document.getElementById('trip-start').value,
+      trip_end: document.getElementById('trip-end').value,
+      total_amount: total, items,
+    }),
+  });
+  document.getElementById('submit-success').classList.remove('hidden');
+  setTimeout(() => document.getElementById('submit-success').classList.add('hidden'), 5000);
+}
+
+// ── Tab 2: 财务侧 ──
+async function loadSubmissions() {
+  const resp = await fetch('/submissions');
+  submissions = await resp.json();
+  const riskOrder = { high:0, medium:1, low:2 };
+  submissions.sort((a, b) => (riskOrder[a.risk]??2) - (riskOrder[b.risk]??2));
+  const pending = submissions.filter(s => s.status === '待审核').length;
+  document.getElementById('pending-count').textContent = `待审核: ${pending}`;
+
+  const riskBadge = {
+    high:   `<span class="px-2 py-0.5 rounded-lg text-xs risk-high">🔴 高</span>`,
+    medium: `<span class="px-2 py-0.5 rounded-lg text-xs risk-medium">🟡 中</span>`,
+    low:    `<span class="px-2 py-0.5 rounded-lg text-xs risk-low">🟢 低</span>`,
+  };
+  const statusBadge = {
+    '待审核': `<span class="px-2 py-0.5 bg-amber-50 text-amber-600 rounded-lg text-xs border border-amber-200">待审核</span>`,
+    '已通过': `<span class="px-2 py-0.5 bg-green-50 text-green-600 rounded-lg text-xs border border-green-200">已通过</span>`,
+    '已退回': `<span class="px-2 py-0.5 bg-red-50 text-red-500 rounded-lg text-xs border border-red-200">已退回</span>`,
+  };
+
+  document.getElementById('submissions-table').innerHTML = submissions.map(s => `
+    <tr class="sub-row border-t border-gray-50" onclick="openAudit('${s.id}')">
+      <td class="px-4 py-3">${riskBadge[s.risk] || ''}</td>
+      <td class="px-4 py-3 font-mono text-xs text-gray-400">${s.id}</td>
+      <td class="px-4 py-3">
+        <span class="font-medium text-gray-800">${s.employee}</span>
+        <span class="text-xs text-gray-400 ml-1">${s.department}</span>
+      </td>
+      <td class="px-4 py-3 text-gray-400 text-xs">${s.city}</td>
+      <td class="px-4 py-3 text-gray-400 text-xs">${s.submit_time}</td>
+      <td class="px-4 py-3 text-right font-medium text-gray-800">¥${s.total_amount.toLocaleString()}</td>
+      <td class="px-4 py-3 text-center">${statusBadge[s.status] || s.status}</td>
+      <td class="px-4 py-3 text-center">
+        <button onclick="event.stopPropagation();openAudit('${s.id}')"
+          class="text-xs text-purple-500 hover:text-purple-700 hover:underline">AI审核</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function openAudit(id) {
+  currentSubmissionId = id;
+  const s = submissions.find(x => x.id === id);
+  if (!s) return;
+
+  document.getElementById('audit-panel').classList.remove('hidden');
+  document.getElementById('audit-title').textContent = `AI 审核报告 — ${s.id} · ${s.employee} (${s.city})`;
+  document.getElementById('audit-output').innerHTML = '';
+  document.getElementById('audit-loading').classList.remove('hidden');
+
+  if (s.issues && s.issues.length > 0) {
+    document.getElementById('issues-section').classList.remove('hidden');
+    document.getElementById('issues-list').innerHTML = s.issues.map(i =>
+      `<p class="text-xs text-red-600">❌ ${i}</p>`
+    ).join('');
+  } else {
+    document.getElementById('issues-section').classList.add('hidden');
+  }
+
+  document.getElementById('audit-panel').scrollIntoView({ behavior: 'smooth' });
+  const resp = await fetch(`/submissions/${id}/audit`, { method: 'POST' });
+  document.getElementById('audit-loading').classList.add('hidden');
+  await streamToHtml(resp, 'audit-output');
+}
+
+function approveSubmission() {
+  if (!currentSubmissionId) return;
+  const s = submissions.find(x => x.id === currentSubmissionId);
+  if (s) s.status = '已通过';
+  loadSubmissions();
+  document.getElementById('audit-panel').classList.add('hidden');
+  showToast('✅ 已通过该报销单');
+}
+
+function rejectSubmission() {
+  if (!currentSubmissionId) return;
+  const s = submissions.find(x => x.id === currentSubmissionId);
+  if (s) s.status = '已退回';
+  loadSubmissions();
+  document.getElementById('audit-panel').classList.add('hidden');
+  showToast('❌ 已退回该报销单，系统将通知员工修改');
+}
+
+// ── Tab 3: 仪表盘 ──
+async function loadDashboard() {
+  const d = await fetch('/dashboard').then(r => r.json());
+  document.getElementById('d-total').textContent = d.total_submissions.toLocaleString();
+  document.getElementById('d-trend').textContent = `↑${d.trend.growth_pct}% vs 上月`;
+  document.getElementById('d-amount').textContent = '¥' + (d.total_amount / 10000).toFixed(1) + '万';
+  document.getElementById('d-avg').textContent = d.avg_audit_minutes + ' min';
+  document.getElementById('d-anomaly').textContent = d.anomaly_rate + '%';
+  document.getElementById('d-passed').textContent = d.passed;
+  document.getElementById('d-rejected').textContent = d.rejected;
+  document.getElementById('d-pending').textContent = d.pending;
+
+  document.getElementById('city-table').innerHTML = d.cities.map(c => `
+    <tr class="border-t border-gray-50">
+      <td class="py-2.5 font-medium text-gray-700">${c.name}</td>
+      <td class="py-2.5 text-right text-gray-500">${c.count}</td>
+      <td class="py-2.5 text-right text-gray-500">¥${(c.amount/10000).toFixed(1)}万</td>
+      <td class="py-2.5 text-right font-medium ${c.anomaly_rate > 9 ? 'text-red-500' : 'text-green-600'}">${c.anomaly_rate}%</td>
+    </tr>
+  `).join('');
+
+  const maxCount = Math.max(...d.top_issues.map(i => i.count));
+  const colors = ['bg-red-400','bg-orange-400','bg-amber-400'];
+  document.getElementById('issues-chart').innerHTML = d.top_issues.map((issue, idx) => `
+    <div>
+      <div class="flex justify-between text-xs mb-1">
+        <span class="text-gray-600">${issue.type}</span>
+        <span class="text-gray-400">${issue.count}例 (${issue.pct}%)</span>
+      </div>
+      <div class="w-full bg-gray-100 rounded-full h-2">
+        <div class="${colors[idx]} h-2 rounded-full transition-all" style="width:${(issue.count/maxCount*100).toFixed(0)}%"></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function analyzeDashboard() {
+  document.getElementById('analyze-output').innerHTML = '';
+  document.getElementById('analyze-loading').classList.remove('hidden');
+  const resp = await fetch('/dashboard/analyze', { method: 'POST' });
+  document.getElementById('analyze-loading').classList.add('hidden');
+  await streamToHtml(resp, 'analyze-output');
+}
+
+// ── 通用：流式 SSE → Markdown ──
+async function streamToHtml(resp, targetId) {
+  const el = document.getElementById(targetId);
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', text = '';
+  el.classList.add('cursor-blink');
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') { el.classList.remove('cursor-blink'); el.innerHTML = marked.parse(text); return; }
       try {
-        const response = await fetch('/chat/stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_input: input }),
-        });
-
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.detail || '请求失败');
-        }
-
-        setLoading(false);
-        outputEl.classList.add('cursor-blink');
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop();
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice(6);
-            if (data === '[DONE]') {
-              outputEl.classList.remove('cursor-blink');
-              isStreaming = false;
-              return;
-            }
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.error) throw new Error(parsed.error);
-              if (parsed.content) outputEl.textContent += parsed.content;
-            } catch (e) {
-              if (e.message !== 'Unexpected end of JSON input') throw e;
-            }
-          }
-        }
-      } catch (err) {
-        setLoading(false);
-        showError(err.message);
-        document.getElementById('output-card').classList.add('hidden');
-      } finally {
-        outputEl.classList.remove('cursor-blink');
-        isStreaming = false;
-      }
+        const parsed = JSON.parse(data);
+        if (parsed.content) { text += parsed.content; el.innerHTML = marked.parse(text); }
+      } catch {}
     }
+  }
+  el.classList.remove('cursor-blink');
+}
 
-    function clearAll() {
-      document.getElementById('user-input').value = '';
-      document.getElementById('char-count').textContent = '0 字';
-      document.getElementById('output-card').classList.add('hidden');
-      hideError();
-    }
-
-    function copyResult() {
-      const text = document.getElementById('output-content').textContent;
-      navigator.clipboard.writeText(text).then(() => {
-        const btn = event.target;
-        btn.textContent = '已复制!';
-        setTimeout(() => btn.textContent = '复制结果', 2000);
-      });
-    }
-
-    function showOutput() {
-      document.getElementById('output-card').classList.remove('hidden');
-    }
-
-    function setLoading(show) {
-      document.getElementById('loading-state').classList.toggle('hidden', !show);
-      document.getElementById('output-content').classList.toggle('hidden', show);
-    }
-
-    function showError(msg) {
-      const card = document.getElementById('error-card');
-      document.getElementById('error-msg').textContent = msg;
-      card.classList.remove('hidden');
-    }
-
-    function hideError() {
-      document.getElementById('error-card').classList.add('hidden');
-    }
-  </script>
+// ── 初始化 ──
+addItem();
+</script>
 </body>
 </html>
