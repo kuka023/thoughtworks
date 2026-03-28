@@ -170,17 +170,18 @@
 </div>
 
 <!-- ═══════ TAB 2: 财务审核台 ═══════ -->
-<div id="panel-finance" class="tab-panel hidden space-y-4">
+<div id="panel-finance" class="tab-panel hidden">
 
-  <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-      <h2 class="text-sm font-semibold text-gray-700">报销单队列</h2>
-      <div class="flex gap-2 text-xs">
-        <span class="px-2 py-1 bg-red-50 text-red-500 rounded-lg">🔴 高风险优先显示</span>
-        <span id="pending-count" class="px-2 py-1 bg-gray-50 text-gray-400 rounded-lg">待审核: --</span>
+  <!-- 列表视图 -->
+  <div id="finance-list">
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-gray-700">报销单队列</h2>
+        <div class="flex gap-2 text-xs">
+          <span class="px-2 py-1 bg-red-50 text-red-500 rounded-lg">🔴 高风险优先</span>
+          <span id="pending-count" class="px-2 py-1 bg-gray-50 text-gray-400 rounded-lg">待审核: --</span>
+        </div>
       </div>
-    </div>
-    <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-gray-50 text-xs text-gray-400">
           <tr>
@@ -201,37 +202,109 @@
     </div>
   </div>
 
-  <div id="audit-panel" class="hidden bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-    <div class="flex items-center justify-between mb-4">
-      <h3 id="audit-title" class="text-sm font-semibold text-gray-700">AI 审核报告</h3>
-      <div class="flex gap-2">
-        <button onclick="approveSubmission()"
-          class="px-4 py-1.5 text-xs text-white bg-green-500 rounded-lg hover:bg-green-600 transition">
-          ✅ 通过
-        </button>
-        <button onclick="rejectSubmission()"
-          class="px-4 py-1.5 text-xs text-white bg-red-500 rounded-lg hover:bg-red-600 transition">
-          ❌ 退回
-        </button>
+  <!-- 详情视图（点击报销单后显示）-->
+  <div id="finance-detail" class="hidden">
+    <button onclick="backToList()"
+      class="mb-4 text-xs text-purple-500 hover:text-purple-700 flex items-center gap-1 transition">
+      ← 返回列表
+    </button>
+
+    <div class="grid grid-cols-5 gap-4">
+
+      <!-- 左栏：报销单信息 + 发票图片 -->
+      <div class="col-span-3 space-y-4">
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h2 id="ad-id" class="text-base font-bold text-gray-800">报销单 #--</h2>
+            <span id="ad-submitter" class="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full">提交人: --</span>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <p class="text-xs text-gray-400 mb-0.5">总金额</p>
+              <p id="ad-amount" class="text-2xl font-bold text-gray-900">¥--</p>
+            </div>
+            <div>
+              <p class="text-xs text-gray-400 mb-0.5">出差事由</p>
+              <p id="ad-purpose" class="text-sm font-medium text-gray-700">--</p>
+            </div>
+            <div>
+              <p class="text-xs text-gray-400 mb-0.5">行程轨迹</p>
+              <p id="ad-route" class="text-sm font-medium text-gray-700">--</p>
+            </div>
+            <div>
+              <p class="text-xs text-gray-400 mb-0.5">发票张数</p>
+              <p id="ad-invoices" class="text-sm font-medium text-gray-700">--</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 发票明细表 -->
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <h3 class="text-xs font-semibold text-gray-500 mb-3">费用明细</h3>
+          <table class="w-full text-xs">
+            <thead class="text-gray-400">
+              <tr>
+                <th class="pb-2 text-left font-normal">类型</th>
+                <th class="pb-2 text-left font-normal">发票类型</th>
+                <th class="pb-2 text-left font-normal">抬头</th>
+                <th class="pb-2 text-left font-normal">日期</th>
+                <th class="pb-2 text-right font-normal">金额</th>
+              </tr>
+            </thead>
+            <tbody id="ad-items" class="divide-y divide-gray-50 text-gray-700"></tbody>
+          </table>
+        </div>
+
+        <!-- 发票图片展示区 -->
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <h3 class="text-xs font-semibold text-gray-500 mb-3">员工上传的发票原件展示区</h3>
+          <div id="ad-images" class="min-h-52 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center">
+            <div class="text-center text-gray-300 py-8">
+              <div class="text-4xl mb-2">🖼️</div>
+              <p class="text-xs">暂无上传图片</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右栏：AI 预审结论 -->
+      <div class="col-span-2 space-y-3">
+        <div class="flex items-center gap-2 pb-1">
+          <span class="text-blue-500 text-xl">🛡️</span>
+          <h3 class="font-bold text-gray-800">AI 预审结论</h3>
+        </div>
+
+        <!-- 加载中 -->
+        <div id="ad-loading" class="text-center py-8">
+          <div class="loading-dots text-xl text-purple-400"><span>·</span><span>·</span><span>·</span></div>
+          <p class="text-gray-400 text-xs mt-2">AI 分析中，请稍候...</p>
+        </div>
+
+        <!-- 问题卡片区（动态生成）-->
+        <div id="ad-issues" class="space-y-3 hidden"></div>
+
+        <!-- AI 起草打回话术 -->
+        <div id="ad-reply-section" class="hidden bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+          <div class="flex items-center gap-1.5 mb-2">
+            <span class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold">AI 起草打回话术</span>
+            <div id="reply-loading" class="loading-dots text-purple-300 text-sm hidden"><span>·</span><span>·</span><span>·</span></div>
+          </div>
+          <div id="ad-reply" class="text-sm text-gray-600 leading-relaxed min-h-[60px]"></div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div id="ad-actions" class="hidden flex gap-2 pt-1">
+          <button onclick="rejectWithScript()"
+            class="flex-1 py-3 bg-red-500 text-white text-sm rounded-2xl hover:bg-red-600 transition font-medium">
+            ↩ 复制话术并退回
+          </button>
+          <button onclick="approveSubmission()"
+            class="flex-1 py-3 bg-green-500 text-white text-sm rounded-2xl hover:bg-green-600 transition font-medium">
+            ✓ 特批通过
+          </button>
+        </div>
       </div>
     </div>
-
-    <!-- RAG 政策引用 -->
-    <div id="citations-panel" class="hidden mb-4 p-4 bg-blue-50 rounded-xl border border-blue-100">
-      <p class="text-xs font-semibold text-blue-600 mb-2">📎 检索到的相关政策依据（来自企业政策库）</p>
-      <div id="citations-list" class="space-y-2"></div>
-    </div>
-
-    <div id="issues-section" class="hidden mb-4 p-3 bg-red-50 rounded-xl border border-red-100">
-      <p class="text-xs font-semibold text-red-500 mb-2">⚠️ 系统预标记问题</p>
-      <div id="issues-list" class="space-y-1"></div>
-    </div>
-
-    <div id="audit-loading" class="hidden text-center py-6">
-      <div class="loading-dots text-xl text-purple-400"><span>·</span><span>·</span><span>·</span></div>
-      <p class="text-gray-400 text-xs mt-1">AI 正在审核中...</p>
-    </div>
-    <div id="audit-output" class="md text-sm text-gray-700 min-h-[80px]"></div>
   </div>
 </div>
 
@@ -526,6 +599,17 @@ async function submitExpense() {
 }
 
 // ── Tab 2: 财务侧 ──
+const riskBadge = {
+  high:   `<span class="px-2 py-0.5 rounded-lg text-xs risk-high">🔴 高</span>`,
+  medium: `<span class="px-2 py-0.5 rounded-lg text-xs risk-medium">🟡 中</span>`,
+  low:    `<span class="px-2 py-0.5 rounded-lg text-xs risk-low">🟢 低</span>`,
+};
+const statusBadge = {
+  '待审核': `<span class="px-2 py-0.5 bg-amber-50 text-amber-600 rounded-lg text-xs border border-amber-200">待审核</span>`,
+  '已通过': `<span class="px-2 py-0.5 bg-green-50 text-green-600 rounded-lg text-xs border border-green-200">已通过</span>`,
+  '已退回': `<span class="px-2 py-0.5 bg-red-50 text-red-500 rounded-lg text-xs border border-red-200">已退回</span>`,
+};
+
 async function loadSubmissions() {
   const resp = await fetch('/submissions');
   submissions = await resp.json();
@@ -533,17 +617,6 @@ async function loadSubmissions() {
   submissions.sort((a, b) => (riskOrder[a.risk]??2) - (riskOrder[b.risk]??2));
   const pending = submissions.filter(s => s.status === '待审核').length;
   document.getElementById('pending-count').textContent = `待审核: ${pending}`;
-
-  const riskBadge = {
-    high:   `<span class="px-2 py-0.5 rounded-lg text-xs risk-high">🔴 高</span>`,
-    medium: `<span class="px-2 py-0.5 rounded-lg text-xs risk-medium">🟡 中</span>`,
-    low:    `<span class="px-2 py-0.5 rounded-lg text-xs risk-low">🟢 低</span>`,
-  };
-  const statusBadge = {
-    '待审核': `<span class="px-2 py-0.5 bg-amber-50 text-amber-600 rounded-lg text-xs border border-amber-200">待审核</span>`,
-    '已通过': `<span class="px-2 py-0.5 bg-green-50 text-green-600 rounded-lg text-xs border border-green-200">已通过</span>`,
-    '已退回': `<span class="px-2 py-0.5 bg-red-50 text-red-500 rounded-lg text-xs border border-red-200">已退回</span>`,
-  };
 
   document.getElementById('submissions-table').innerHTML = submissions.map(s => `
     <tr class="sub-row border-t border-gray-50" onclick="openAudit('${s.id}')">
@@ -559,7 +632,7 @@ async function loadSubmissions() {
       <td class="px-4 py-3 text-center">${statusBadge[s.status] || s.status}</td>
       <td class="px-4 py-3 text-center">
         <button onclick="event.stopPropagation();openAudit('${s.id}')"
-          class="text-xs text-purple-500 hover:text-purple-700 hover:underline">AI审核</button>
+          class="text-xs text-purple-500 hover:text-purple-700 hover:underline">AI审核 →</button>
       </td>
     </tr>
   `).join('');
@@ -570,44 +643,138 @@ async function openAudit(id) {
   const s = submissions.find(x => x.id === id);
   if (!s) return;
 
-  document.getElementById('audit-panel').classList.remove('hidden');
-  document.getElementById('audit-title').textContent = `AI 审核报告 — ${s.id} · ${s.employee} (${s.city})`;
-  document.getElementById('audit-output').innerHTML = '';
-  document.getElementById('audit-loading').classList.remove('hidden');
+  // 切换到详情视图
+  document.getElementById('finance-list').classList.add('hidden');
+  document.getElementById('finance-detail').classList.remove('hidden');
 
-  if (s.issues && s.issues.length > 0) {
-    document.getElementById('issues-section').classList.remove('hidden');
-    document.getElementById('issues-list').innerHTML = s.issues.map(i =>
-      `<p class="text-xs text-red-600">❌ ${i}</p>`
+  // 填充左栏基本信息
+  document.getElementById('ad-id').textContent = `报销单 #${s.id}`;
+  document.getElementById('ad-submitter').textContent = `提交人：${s.department} - ${s.employee}`;
+  document.getElementById('ad-amount').textContent = `¥${s.total_amount.toLocaleString()}`;
+  document.getElementById('ad-purpose').textContent = s.trip_purpose || `${s.city}出差`;
+  document.getElementById('ad-route').textContent = `本地 → ${s.city}`;
+  document.getElementById('ad-invoices').textContent = `${s.items.length}张`;
+
+  // 填充费用明细表
+  document.getElementById('ad-items').innerHTML = s.items.map(item => `
+    <tr class="border-t border-gray-50">
+      <td class="py-2 text-gray-700">${item.type}</td>
+      <td class="py-2 text-gray-400">${item.invoice_type}</td>
+      <td class="py-2 ${item.company_header && !item.company_header.includes('有限') ? 'text-red-500 font-medium' : 'text-gray-500'}">${item.company_header||'—'}</td>
+      <td class="py-2 text-gray-400">${item.date}</td>
+      <td class="py-2 text-right font-medium text-gray-800">¥${item.amount.toLocaleString()}</td>
+    </tr>
+  `).join('');
+
+  // 发票图片
+  const imagesEl = document.getElementById('ad-images');
+  if (s.images && s.images.length > 0) {
+    imagesEl.innerHTML = s.images.map(imgId =>
+      `<img src="/data/uploads/${imgId}" class="max-h-64 rounded-lg object-contain" />`
     ).join('');
   } else {
-    document.getElementById('issues-section').classList.add('hidden');
+    imagesEl.innerHTML = `<div class="text-center text-gray-300 py-8"><div class="text-4xl mb-2">🖼️</div><p class="text-xs">暂无上传图片</p></div>`;
   }
 
-  document.getElementById('citations-panel').classList.add('hidden');
-  document.getElementById('citations-list').innerHTML = '';
-  document.getElementById('audit-panel').scrollIntoView({ behavior: 'smooth' });
+  // 重置右栏
+  document.getElementById('ad-loading').classList.remove('hidden');
+  document.getElementById('ad-issues').classList.add('hidden');
+  document.getElementById('ad-issues').innerHTML = '';
+  document.getElementById('ad-reply-section').classList.add('hidden');
+  document.getElementById('ad-actions').classList.add('hidden');
+  document.getElementById('ad-reply').innerHTML = '';
+
+  // 调用 AI 审核
   const resp = await fetch(`/submissions/${id}/audit`, { method: 'POST' });
-  document.getElementById('audit-loading').classList.add('hidden');
-  await streamToHtml(resp, 'audit-output', showCitations);
+  await streamAuditDetail(resp);
+}
+
+function backToList() {
+  document.getElementById('finance-list').classList.remove('hidden');
+  document.getElementById('finance-detail').classList.add('hidden');
+  loadSubmissions();
+}
+
+async function streamAuditDetail(resp) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', replyText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') {
+        document.getElementById('reply-loading').classList.add('hidden');
+        return;
+      }
+      try {
+        const parsed = JSON.parse(data);
+
+        if (parsed.structured_issues) {
+          // 渲染结构化问题卡片
+          document.getElementById('ad-loading').classList.add('hidden');
+          document.getElementById('ad-issues').classList.remove('hidden');
+          document.getElementById('ad-reply-section').classList.remove('hidden');
+          document.getElementById('ad-actions').classList.remove('hidden');
+          document.getElementById('reply-loading').classList.remove('hidden');
+          renderIssueCards(parsed.structured_issues);
+        } else if (parsed.content) {
+          // 流式输出话术
+          replyText += parsed.content;
+          document.getElementById('ad-reply').textContent = replyText;
+        }
+      } catch {}
+    }
+  }
+}
+
+function renderIssueCards(issues) {
+  const riskConfig = {
+    high:   { bg: 'bg-red-50',    border: 'border-red-200',    badge: 'bg-red-100 text-red-600',    dot: '🔴', label: '高风险' },
+    medium: { bg: 'bg-amber-50',  border: 'border-amber-200',  badge: 'bg-amber-100 text-amber-700', dot: '🟡', label: '中风险' },
+    low:    { bg: 'bg-green-50',  border: 'border-green-200',  badge: 'bg-green-100 text-green-700', dot: '🟢', label: '通过' },
+  };
+
+  const container = document.getElementById('ad-issues');
+  container.innerHTML = issues.map(issue => {
+    const cfg = riskConfig[issue.risk] || riskConfig.medium;
+    const ragHtml = issue.rag_source ? `
+      <div class="mt-2 p-2 bg-white rounded-lg border border-gray-100 text-xs text-gray-500">
+        <span class="font-semibold text-blue-500">📄 制度依据</span>：根据 RAG 检索《${issue.rag_source}》：${issue.rag_rule?.slice(0,80) || ''}
+      </div>` : '';
+    return `
+      <div class="${cfg.bg} ${cfg.border} border rounded-2xl p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-sm font-bold text-gray-800">${cfg.dot} ${issue.title}</h4>
+          <span class="${cfg.badge} text-xs px-2 py-0.5 rounded-full font-medium">${cfg.label}</span>
+        </div>
+        <p class="text-xs text-gray-600 leading-relaxed">${issue.description}</p>
+        ${ragHtml}
+      </div>`;
+  }).join('');
 }
 
 function approveSubmission() {
-  if (!currentSubmissionId) return;
   const s = submissions.find(x => x.id === currentSubmissionId);
   if (s) s.status = '已通过';
-  loadSubmissions();
-  document.getElementById('audit-panel').classList.add('hidden');
-  showToast('✅ 已通过该报销单');
+  backToList();
+  showToast('✅ 已特批通过该报销单');
 }
 
-function rejectSubmission() {
-  if (!currentSubmissionId) return;
+function rejectWithScript() {
+  const replyText = document.getElementById('ad-reply').textContent;
+  if (replyText) navigator.clipboard.writeText(replyText);
   const s = submissions.find(x => x.id === currentSubmissionId);
   if (s) s.status = '已退回';
-  loadSubmissions();
-  document.getElementById('audit-panel').classList.add('hidden');
-  showToast('❌ 已退回该报销单，系统将通知员工修改');
+  backToList();
+  showToast('❌ 话术已复制，报销单已退回');
 }
 
 // ── Tab 3: 仪表盘 ──

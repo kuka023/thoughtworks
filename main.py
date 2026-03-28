@@ -185,6 +185,26 @@ class SubmitRequest(BaseModel):
     image_ids: list = []
 
 
+# ── 问题分类工具 ──
+_TITLE_MAP = [
+    (["个人姓名", "抬头"], "发票抬头错误"),
+    (["日期", "超出", "范围"], "票据日期超出出差范围"),
+    (["重复", "发票"], "发票重复提交"),
+    (["五星", "华尔道夫", "奢华"], "住宿超出标准"),
+    (["超标", "超出差", "超限", "超过政策"], "金额超标预警"),
+    (["类型", "不匹配", "专票", "餐饮"], "发票类型不符"),
+]
+
+def classify_issue(text: str) -> tuple[str, str]:
+    """返回 (标题, 风险等级)"""
+    high_kw = ["个人姓名", "重复", "五星", "华尔道夫", "超标", "超限", "不符"]
+    risk = "high" if any(k in text for k in high_kw) else "medium"
+    for kws, title in _TITLE_MAP:
+        if all(k in text for k in kws) or any(k in text for k in kws[:1]):
+            return title, risk
+    return "审核异常", risk
+
+
 # ── 工具函数 ──
 def stream_llm(system: str, user: str, prefix_events: list = None):
     """SSE 流：先发 prefix_events（如 citations），再流式输出 LLM"""
@@ -352,56 +372,39 @@ def audit_submission(submission_id: str):
     if not s:
         raise HTTPException(status_code=404, detail="报销单不存在")
 
-    # ── RAG：检索相关政策条款 ──
-    citations = rag.retrieve_for_submission(s)
+    # ── 生成结构化问题卡片（不调用LLM，快速返回）──
+    issue_cards = []
+    for issue_text in (s.get("issues") or []):
+        title, risk = classify_issue(issue_text)
+        related = rag.retrieve(issue_text, k=1)
+        issue_cards.append({
+            "title": title,
+            "risk": risk,
+            "description": issue_text,
+            "rag_source": related[0]["source"] if related else None,
+            "rag_rule": related[0]["rule"] if related else None,
+        })
 
-    policy_ctx = ""
-    if citations:
-        policy_ctx = "\n\n## 检索到的相关政策条款（审核时请引用具体条款编号）\n"
-        for i, c in enumerate(citations, 1):
-            policy_ctx += f"[条款{i}]「{c['source']}」{c['rule']}\n"
+    # 无问题时加一条"合规"卡
+    if not issue_cards:
+        issue_cards.append({
+            "title": "合规性检查通过",
+            "risk": "low",
+            "description": "系统未发现明显合规问题，建议直接通过。",
+            "rag_source": None, "rag_rule": None,
+        })
 
-    system = f"""你是资深财务审核专家，为财务专员提供AI辅助审核意见。
-{"系统已从政策库中检索到相关条款，请在核查详情中明确引用对应条款编号（如[条款1]），增加审核的可追溯性。" if citations else ""}
+    # ── LLM 流式生成退回话术 ──
+    system = """你是财务专员助手，起草一段给员工的退回通知（如无问题则写通过通知）。
+要求：语气友善专业，承认员工辛苦，指出具体问题并说明需要修正的内容，100-150字，用引号包裹，不要其他说明。"""
 
-输出格式（Markdown）：
+    issues_desc = "\n".join(f"- {i['description']}" for i in issue_cards if i["risk"] != "low")
+    user = f"""员工：{s['employee']}（{s['department']}）
+报销单：{s['id']}，金额：¥{s['total_amount']}
+问题列表：
+{issues_desc if issues_desc else '无问题，合规通过'}"""
 
-## 审核结论
-
-**建议操作**：✅ 通过 / ⚠️ 人工复核 / ❌ 建议退回（三选一）
-
-**风险等级**：🟢 低风险 / 🟡 中风险 / 🔴 高风险
-
-## 核查详情
-
-（每项：✅/⚠️/❌ **核查项**：说明，{"引用[条款X]" if citations else ""}）
-
-- 发票合规性
-- 日期匹配性
-- 金额准确性
-- 费用类型合理性
-- 政策符合性
-
-## 退回意见
-
-（建议退回时给出标准化退回文字；通过则写"无需退回"）
-
----
-*本意见为AI辅助建议，最终决定权在财务专员。*"""
-
-    user = f"""报销单：{s['id']}
-员工：{s['employee']} | 部门：{s['department']} | 城市：{s['city']}
-出差日期：{s['trip_start']} 至 {s['trip_end']}
-申报总额：¥{s['total_amount']}
-
-明细：
-{json.dumps(s['items'], ensure_ascii=False, indent=2)}
-
-系统预标记问题：{s['issues'] if s['issues'] else '无'}
-{policy_ctx}"""
-
-    # citations 作为第一个 SSE 事件发给前端展示
-    prefix = [{"citations": citations}] if citations else []
+    prefix = [{"structured_issues": issue_cards}]
     return stream_llm(system, user, prefix_events=prefix)
 
 
