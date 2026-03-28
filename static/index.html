@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 智能助手</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+    .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .card { backdrop-filter: blur(10px); }
+    #output-content { white-space: pre-wrap; line-height: 1.8; }
+    .cursor-blink::after {
+      content: '▋';
+      animation: blink 1s infinite;
+      color: #764ba2;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    .loading-dots span {
+      animation: dots 1.2s infinite;
+      display: inline-block;
+    }
+    .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes dots { 0%,80%,100%{opacity:0} 40%{opacity:1} }
+  </style>
+</head>
+<body class="min-h-screen bg-gray-50">
+
+  <!-- Header -->
+  <div class="gradient-bg text-white py-8 px-6 shadow-lg">
+    <div class="max-w-4xl mx-auto">
+      <h1 id="product-title" class="text-3xl font-bold mb-1">AI 智能助手</h1>
+      <p id="product-subtitle" class="text-purple-200 text-sm">由豆包大模型驱动</p>
+    </div>
+  </div>
+
+  <div class="max-w-4xl mx-auto px-6 py-8 space-y-6">
+
+    <!-- Input Card -->
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <label class="block text-sm font-semibold text-gray-600 mb-3">输入</label>
+      <textarea
+        id="user-input"
+        rows="6"
+        placeholder="请输入内容..."
+        class="w-full border border-gray-200 rounded-xl p-4 text-gray-800 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition"
+      ></textarea>
+
+      <div class="flex items-center justify-between mt-4">
+        <span id="char-count" class="text-xs text-gray-400">0 字</span>
+        <div class="flex gap-3">
+          <button
+            id="clear-btn"
+            onclick="clearAll()"
+            class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:border-gray-300 transition"
+          >
+            清空
+          </button>
+          <button
+            id="submit-btn"
+            onclick="submitChat()"
+            class="px-6 py-2 text-sm text-white gradient-bg rounded-lg hover:opacity-90 transition font-medium shadow-sm"
+          >
+            分析
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Output Card -->
+    <div id="output-card" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hidden">
+      <div class="flex items-center justify-between mb-4">
+        <label id="output-title" class="block text-sm font-semibold text-gray-600">AI 分析结果</label>
+        <button
+          onclick="copyResult()"
+          class="text-xs text-purple-500 hover:text-purple-700 flex items-center gap-1 transition"
+        >
+          复制结果
+        </button>
+      </div>
+
+      <!-- Loading state -->
+      <div id="loading-state" class="hidden text-center py-8">
+        <div class="loading-dots text-2xl text-purple-400">
+          <span>·</span><span>·</span><span>·</span>
+        </div>
+        <p class="text-gray-400 text-sm mt-2">正在分析中...</p>
+      </div>
+
+      <!-- Output content -->
+      <div
+        id="output-content"
+        class="text-gray-700 text-sm leading-relaxed min-h-[100px]"
+      ></div>
+    </div>
+
+    <!-- Error Card -->
+    <div id="error-card" class="hidden bg-red-50 border border-red-200 rounded-2xl p-4">
+      <p id="error-msg" class="text-red-600 text-sm"></p>
+    </div>
+
+  </div>
+
+  <script>
+    let isStreaming = false;
+
+    // Load config from backend
+    fetch('/config')
+      .then(r => r.json())
+      .then(cfg => {
+        document.getElementById('product-title').textContent = cfg.product_title;
+        document.getElementById('product-subtitle').textContent = cfg.product_subtitle;
+        document.getElementById('user-input').placeholder = cfg.input_placeholder;
+        document.getElementById('output-title').textContent = cfg.output_title;
+        document.title = cfg.product_title;
+        document.getElementById('submit-btn').textContent = '分析';
+      });
+
+    // Char count
+    document.getElementById('user-input').addEventListener('input', function() {
+      document.getElementById('char-count').textContent = this.value.length + ' 字';
+    });
+
+    // Ctrl+Enter to submit
+    document.getElementById('user-input').addEventListener('keydown', function(e) {
+      if (e.ctrlKey && e.key === 'Enter') submitChat();
+    });
+
+    async function submitChat() {
+      if (isStreaming) return;
+      const input = document.getElementById('user-input').value.trim();
+      if (!input) {
+        showError('请输入内容后再提交');
+        return;
+      }
+
+      isStreaming = true;
+      hideError();
+      showOutput();
+      setLoading(true);
+
+      const outputEl = document.getElementById('output-content');
+      outputEl.textContent = '';
+      outputEl.classList.remove('cursor-blink');
+
+      try {
+        const response = await fetch('/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_input: input }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.detail || '请求失败');
+        }
+
+        setLoading(false);
+        outputEl.classList.add('cursor-blink');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              outputEl.classList.remove('cursor-blink');
+              isStreaming = false;
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.error) throw new Error(parsed.error);
+              if (parsed.content) outputEl.textContent += parsed.content;
+            } catch (e) {
+              if (e.message !== 'Unexpected end of JSON input') throw e;
+            }
+          }
+        }
+      } catch (err) {
+        setLoading(false);
+        showError(err.message);
+        document.getElementById('output-card').classList.add('hidden');
+      } finally {
+        outputEl.classList.remove('cursor-blink');
+        isStreaming = false;
+      }
+    }
+
+    function clearAll() {
+      document.getElementById('user-input').value = '';
+      document.getElementById('char-count').textContent = '0 字';
+      document.getElementById('output-card').classList.add('hidden');
+      hideError();
+    }
+
+    function copyResult() {
+      const text = document.getElementById('output-content').textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        btn.textContent = '已复制!';
+        setTimeout(() => btn.textContent = '复制结果', 2000);
+      });
+    }
+
+    function showOutput() {
+      document.getElementById('output-card').classList.remove('hidden');
+    }
+
+    function setLoading(show) {
+      document.getElementById('loading-state').classList.toggle('hidden', !show);
+      document.getElementById('output-content').classList.toggle('hidden', show);
+    }
+
+    function showError(msg) {
+      const card = document.getElementById('error-card');
+      document.getElementById('error-msg').textContent = msg;
+      card.classList.remove('hidden');
+    }
+
+    function hideError() {
+      document.getElementById('error-card').classList.add('hidden');
+    }
+  </script>
+</body>
+</html>
